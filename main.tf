@@ -1,7 +1,93 @@
 locals {
-  create_origin_access_identity = var.create_origin_access_identity && length(keys(var.origin_access_identities)) > 0
-  create_origin_access_control  = var.create_origin_access_control && length(keys(var.origin_access_control)) > 0
+  create_origin_access_identity  = var.create_origin_access_identity && length(keys(var.origin_access_identities)) > 0
+  create_origin_access_control   = var.create_origin_access_control && length(keys(var.origin_access_control)) > 0
+  create_response_headers_policy = var.create_response_headers_policy && length(keys(var.response_headers_policy)) > 0
 }
+
+resource "aws_cloudfront_response_headers_policy" "this" {
+  for_each = local.create_response_headers_policy ? var.response_headers_policy : {}
+
+  name    = try(each.value.name, each.key)
+  comment = try(each.value.comment, null)
+
+  dynamic "cors_config" {
+    for_each = try(each.value.cors_config, null) == null ? [] : [each.value.cors_config]
+
+    content {
+      origin_override                  = try(cors_config.value.origin_override, null)
+      access_control_allow_credentials = try(cors_config.value.access_control_allow_credentials, null)
+      access_control_max_age_sec       = try(cors_config.value.access_control_max_age_sec, null)
+
+      dynamic "access_control_allow_headers" {
+        for_each = try(cors_config.value.access_control_allow_headers, null) == null ? [] : [true]
+
+        content {
+          items = cors_config.value.access_control_allow_headers
+        }
+      }
+
+      dynamic "access_control_allow_methods" {
+        for_each = try(cors_config.value.access_control_allow_methods, null) == null ? [] : [true]
+
+        content {
+          items = cors_config.value.access_control_allow_methods
+        }
+      }
+
+      dynamic "access_control_allow_origins" {
+        for_each = try(cors_config.value.access_control_allow_origins, null) == null ? [] : [true]
+
+        content {
+          items = cors_config.value.access_control_allow_origins
+        }
+      }
+
+      dynamic "access_control_expose_headers" {
+        for_each = try(cors_config.value.access_control_expose_headers, null) == null ? [] : [true]
+
+        content {
+          items = cors_config.value.access_control_expose_headers
+        }
+      }
+    }
+  }
+
+  dynamic "custom_headers_config" {
+    for_each = try(each.value.custom_headers_config, null) == null ? [] : [true]
+    content {
+      dynamic "items" {
+        for_each = try(each.value.custom_headers_config, [])
+        content {
+          header   = items.value.header
+          value    = items.value.value
+          override = items.value.override
+        }
+      }
+    }
+  }
+
+  dynamic "remove_headers_config" {
+    for_each = try(each.value.remove_headers_config, null) == null ? [] : [1]
+    content {
+      dynamic "items" {
+        for_each = try(each.value.remove_headers_config, [])
+
+        content {
+          header = items.value
+        }
+      }
+    }
+  }
+
+  dynamic "server_timing_headers_config" {
+    for_each = try(each.value.server_timing_headers_config, null) == null ? [] : [each.value.server_timing_headers_config]
+    content {
+      enabled       = try(server_timing_headers_config.value.enabled, null)
+      sampling_rate = try(server_timing_headers_config.value.sampling_rate, null)
+    }
+  }
+}
+
 
 resource "aws_cloudfront_origin_access_identity" "this" {
   for_each = local.create_origin_access_identity ? var.origin_access_identities : {}
@@ -22,6 +108,12 @@ resource "aws_cloudfront_origin_access_control" "this" {
   origin_access_control_origin_type = each.value["origin_type"]
   signing_behavior                  = each.value["signing_behavior"]
   signing_protocol                  = each.value["signing_protocol"]
+}
+
+locals {
+  created_response_headers_policy = !local.create_response_headers_policy ? {} : {
+    for k, v in var.response_headers_policy : v.name => aws_cloudfront_response_headers_policy.this[k]
+  }
 }
 
 resource "aws_cloudfront_distribution" "this" {
@@ -141,7 +233,7 @@ resource "aws_cloudfront_distribution" "this" {
 
       cache_policy_id            = try(i.value.cache_policy_id, data.aws_cloudfront_cache_policy.this[i.value.cache_policy_name].id, null)
       origin_request_policy_id   = try(i.value.origin_request_policy_id, data.aws_cloudfront_origin_request_policy.this[i.value.origin_request_policy_name].id, null)
-      response_headers_policy_id = try(i.value.response_headers_policy_id, data.aws_cloudfront_response_headers_policy.this[i.value.response_headers_policy_name].id, null)
+      response_headers_policy_id = try(i.value.response_headers_policy_id, data.aws_cloudfront_response_headers_policy.this[i.value.response_headers_policy_name].id, local.created_response_headers_policy[i.value.response_headers_policy_name].id, null)
 
       realtime_log_config_arn = lookup(i.value, "realtime_log_config_arn", null)
 
@@ -206,7 +298,7 @@ resource "aws_cloudfront_distribution" "this" {
 
       cache_policy_id            = try(i.value.cache_policy_id, data.aws_cloudfront_cache_policy.this[i.value.cache_policy_name].id, null)
       origin_request_policy_id   = try(i.value.origin_request_policy_id, data.aws_cloudfront_origin_request_policy.this[i.value.origin_request_policy_name].id, null)
-      response_headers_policy_id = try(i.value.response_headers_policy_id, data.aws_cloudfront_response_headers_policy.this[i.value.response_headers_policy_name].id, null)
+      response_headers_policy_id = try(i.value.response_headers_policy_id, data.aws_cloudfront_response_headers_policy.this[i.value.response_headers_policy_name].id, local.created_response_headers_policy[i.value.response_headers_policy_name].id, null)
 
       realtime_log_config_arn = lookup(i.value, "realtime_log_config_arn", null)
 
@@ -283,6 +375,8 @@ resource "aws_cloudfront_distribution" "this" {
       }
     }
   }
+
+  depends_on = [aws_cloudfront_response_headers_policy.this]
 }
 
 resource "aws_cloudfront_monitoring_subscription" "this" {
@@ -310,7 +404,7 @@ data "aws_cloudfront_origin_request_policy" "this" {
 }
 
 data "aws_cloudfront_response_headers_policy" "this" {
-  for_each = toset([for v in concat([var.default_cache_behavior], var.ordered_cache_behavior) : v.response_headers_policy_name if can(v.response_headers_policy_name)])
+  for_each = toset([for v in concat([var.default_cache_behavior], var.ordered_cache_behavior) : v.response_headers_policy_name if can(v.response_headers_policy_name) && !local.create_response_headers_policy])
 
   name = each.key
 }

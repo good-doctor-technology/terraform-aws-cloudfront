@@ -181,3 +181,14 @@ variable "realtime_metrics_subscription_status" {
   type        = string
   default     = "Enabled"
 }
+
+variable "create_response_headers_policy" {
+  description = "Controls if CloudFront response headers policy should be created"
+  type        = bool
+  default     = false
+}
+
+variable "response_headers_policy" {
+  description = "The response headers policy for this distribution"
+  type        = any
+}
