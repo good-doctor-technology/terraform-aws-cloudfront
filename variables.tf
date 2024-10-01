@@ -191,4 +191,5 @@ variable "create_response_headers_policy" {
 variable "response_headers_policy" {
   description = "The response headers policy for this distribution"
   type        = any
+  default     = {}
 }
